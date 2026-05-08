@@ -73,7 +73,7 @@ resource "aws_security_group" "web_sg" {
   }
 }
 
-# 7. EC2 Instance 생성 (user_data로 모든 설정 통합)
+# 7. EC2 Instance 생성 (file provisioner 사용)
 resource "aws_instance" "web_server" {
   ami           = "ami-0d4c056a16f3ae150" # 사용하려는 AMI ID로 변경하세요 (Ubuntu 24.04 LTS)
   instance_type = "t2.micro"
@@ -81,31 +81,47 @@ resource "aws_instance" "web_server" {
   subnet_id     = aws_subnet.main.id # 새로 생성한 Subnet ID 지정
   vpc_security_group_ids = [aws_security_group.web_sg.id]
 
+  # user_data로 Apache2 설치 및 시작
   user_data = <<EOF
-#!/bin/bash
+  #!/bin/bash
+  sudo apt-get update -y
+  sudo apt-get install -y apache2
+  sudo systemctl start apache2
+  sudo systemctl enable apache2
+  EOF
 
-# Ubuntu 패키지 업데이트 및 Apache2 설치
-sudo apt-get update -y
-sudo apt-get install -y apache2
+  # file 프로비저너: 로컬 index.html 파일을 EC2로 복사
+  provisioner "file" {
+    source      = "${path.module}/index.html" # 로컬 HTML 파일 경로
+    destination = "/tmp/index.html"       # EC2 인스턴스 내 임시 경로
 
-# Apache2 서비스 시작 및 부팅 시 자동 실행 설정
-sudo systemctl start apache2
-sudo systemctl enable apache2
+    connection {
+      type        = "ssh"
+      user        = "ubuntu" # Ubuntu AMI는 기본 사용자가 ubuntu입니다
+      private_key = file("/Users/gyeongdaeyeong/Desktop/key/rootkey.pem") # SSH 키 파일의 로컬 전체 경로
+      host        = self.public_ip
+    }
+  }
 
-# 웹 루트 디렉토리 생성 (혹시 없을 경우)
-sudo mkdir -p /var/www/html
+  # remote-exec 프로비저너: 복사된 파일 이동 및 Apache 재시작
+  provisioner "remote-exec" {
+    inline = [
+      "sleep 30", # Apache 설치 및 시작 완료를 위해 잠시 대기
+      "sudo mkdir -p /var/www/html", # 웹 루트 디렉토리 생성 (혹시 없을 경우)
+      "sudo mv /tmp/index.html /var/www/html/index.html", # HTML 파일을 웹 서버 경로로 이동
+      "sudo systemctl restart apache2" # Apache2 서비스 재시작
+    ]
 
-# index.html 파일 생성 및 내용 삽입
-sudo tee /var/www/html/index.html > /dev/null <<'HTML_CONTENT'
-$(cat ${path.module}/index.html)
-HTML_CONTENT
-
-# Apache2 서비스 재시작 (변경사항 적용)
-sudo systemctl restart apache2
-EOF
+    connection {
+      type        = "ssh"
+      user        = "ubuntu"
+      private_key = file("/Users/gyeongdaeyeong/Desktop/key/rootkey.pem")
+      host        = self.public_ip
+    }
+  }
 
   tags = {
-    Name = "web-server-user-data-final"
+    Name = "web-server-file-provisioner"
   }
 }
 
