@@ -48,8 +48,8 @@ resource "aws_route_table_association" "main" {
 }
 
 # 6. Security Group 생성 (VPC ID 명시)
-resource "aws_security_group" "web_sg_provisioner" {
-  name        = "web-security-group-for-provisioner"
+resource "aws_security_group" "web_sg" {
+  name        = "web-security-group-for-html"
   description = "Allow HTTP and SSH traffic"
   vpc_id      = aws_vpc.main.id # 새로 생성한 VPC ID 지정
 
@@ -73,54 +73,43 @@ resource "aws_security_group" "web_sg_provisioner" {
   }
 }
 
-# 7. EC2 Instance 생성 (Subnet ID 명시)
-resource "aws_instance" "web_server_provisioner" {
-  ami           = "ami-0d4c056a16f3ae150" # 사용하려는 AMI ID로 변경하세요
+# 7. EC2 Instance 생성 (user_data로 모든 설정 통합)
+resource "aws_instance" "web_server" {
+  ami           = "ami-0d4c056a16f3ae150" # 사용하려는 AMI ID로 변경하세요 (Ubuntu 24.04 LTS)
   instance_type = "t2.micro"
   key_name      = "rootkey" # AWS에 등록된 키 페어 이름으로 변경
   subnet_id     = aws_subnet.main.id # 새로 생성한 Subnet ID 지정
-  vpc_security_group_ids = [aws_security_group.web_sg_provisioner.id]
+  vpc_security_group_ids = [aws_security_group.web_sg.id]
 
   user_data = <<EOF
 #!/bin/bash
-yum update -y
-yum install -y httpd
-systemctl start httpd
-systemctl enable httpd
+
+# Ubuntu 패키지 업데이트 및 Apache2 설치
+sudo apt-get update -y
+sudo apt-get install -y apache2
+
+# Apache2 서비스 시작 및 부팅 시 자동 실행 설정
+sudo systemctl start apache2
+sudo systemctl enable apache2
+
+# 웹 루트 디렉토리 생성 (혹시 없을 경우)
+sudo mkdir -p /var/www/html
+
+# index.html 파일 생성 및 내용 삽입
+sudo tee /var/www/html/index.html > /dev/null <<'HTML_CONTENT'
+$(cat ${path.module}/index.html)
+HTML_CONTENT
+
+# Apache2 서비스 재시작 (변경사항 적용)
+sudo systemctl restart apache2
 EOF
 
-  provisioner "file" {
-    source      = "${path.module}/index.html" # 로컬 HTML 파일 경로
-    destination = "/tmp/index.html"       # EC2 인스턴스 내 임시 경로
-
-    connection {
-      type        = "ssh"
-      user        = "ec2-user" # AMI에 따라 사용자 이름 변경 (예: ubuntu, centos )
-      private_key = file("/Users/gyeongdaeyeong/Desktop/key/rootkey.pem") # SSH 키 파일의 로컬 전체 경로
-      host        = self.public_ip
-    }
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "sudo mv /tmp/index.html /var/www/html/index.html", # HTML 파일을 웹 서버 경로로 이동
-      "sudo systemctl restart httpd" # 웹 서버 재시작
-    ]
-
-    connection {
-      type        = "ssh"
-      user        = "ec2-user"
-      private_key = file("/Users/gyeongdaeyeong/Desktop/key/rootkey.pem") # SSH 키 파일의 로컬 전체 경로
-      host        = self.public_ip
-    }
-  }
-
   tags = {
-    Name = "web-server-provisioner"
+    Name = "web-server-user-data-final"
   }
 }
 
 output "public_ip" {
-  value = aws_instance.web_server_provisioner.public_ip
+  value = aws_instance.web_server.public_ip
   description = "The public IP address of the web server"
 }
