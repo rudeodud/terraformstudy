@@ -1,0 +1,5 @@
+aws_region       = "ap-northeast-2"
+ami_id           = "ami-0d4c056a16f3ae150"
+instance_type    = "t2.micro"
+key_name         = "rootkey"
+private_key_path = "/Users/gyeongdaeyeong/Desktop/key/rootkey.pem"
